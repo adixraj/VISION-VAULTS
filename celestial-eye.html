@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Project Zenith — The Celestial Eye</title>
+<meta name="description" content="A real-time cosmic radar. Pick any point on Earth and see exactly what's passing through the sky above it." />
+
+<!-- Leaflet map library (loaded from CDN, no install needed) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- satellite.js for real orbital math (loaded from CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"></script>
+
+<!-- Google Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --space-950: #060912;
+    --space-900: #0a0e1a;
+    --space-800: #0f1526;
+    --space-700: #1a2547;
+    --space-600: #27336b;
+    --space-500: #3a4a8f;
+    --signal-400: #ffd699;
+    --signal-500: #ffb84d;
+    --signal-600: #e6982e;
+    --starlight-100: #f4f7fb;
+    --starlight-300: #dce4f0;
+    --starlight-500: #8e9ec2;
+    --starlight-700: #5a6690;
+    --teal-400: #4ee0c8;
+    --teal-500: #2ab5a0;
+    --danger-500: #ff6b6b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--space-900);
+    color: var(--starlight-300);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+  }
+
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--space-900); }
+  ::-webkit-scrollbar-thumb { background: var(--space-600); border-radius: 4px; }
+
+  :focus-visible { outline: 2px solid var(--signal-500); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+
+  /* ===== Layout ===== */
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--space-700);
+    background: rgba(10, 14, 26, 0.95);
+    padding: 14px 20px;
+    backdrop-filter: blur(8px);
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  .brand-dot-ring {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 184, 77, 0.4);
+    background: rgba(255, 184, 77, 0.1);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .brand-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--signal-500);
+    animation: pulseSlow 3s ease-in-out infinite;
+  }
+
+  .brand-title { font-size: 15px; font-weight: 600; color: var(--starlight-100); line-height: 1.2; }
+  .brand-subtitle { font-size: 11px; color: var(--starlight-700); line-height: 1.2; }
+
+  .status-bar {
+    display: none;
+    align-items: center; gap: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--starlight-500);
+  }
+  @media (min-width: 640px) { .status-bar { display: flex; } }
+  .status-divider { color: var(--space-600); }
+  .status-night { color: var(--signal-500); }
+  .status-day { color: var(--teal-400); }
+  .status-live { color: var(--teal-400); }
+  .status-loading { color: var(--starlight-700); }
+  .status-offline { color: var(--signal-500); }
+
+  .search-bar {
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--space-700);
+    background: var(--space-900);
+    padding: 12px 20px;
+  }
+
+  .search-form { display: flex; gap: 8px; }
+
+  .search-input {
+    flex: 1;
+    border-radius: 8px;
+    background: var(--space-800);
+    border: 1px solid var(--space-600);
+    padding: 10px 14px;
+    font-size: 14px;
+    color: var(--starlight-100);
+    font-family: inherit;
+  }
+  .search-input::placeholder { color: var(--starlight-700); }
+  .search-input:focus { border-color: var(--signal-500); outline: none; }
+
+  .btn {
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    border: 1px solid var(--space-600);
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  .btn-secondary { background: var(--space-700); color: var(--starlight-100); }
+  .btn-secondary:hover { background: var(--space-600); }
+  .btn-primary {
+    background: var(--signal-500); color: var(--space-950);
+    font-weight: 600; border: none;
+  }
+  .btn-primary:hover { background: var(--signal-600); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .search-meta {
+    display: flex; justify-content: space-between;
+    font-size: 12px; padding: 0 4px; margin-top: 6px;
+  }
+  .search-meta-label { color: var(--starlight-500); }
+  .search-meta-value { color: var(--starlight-300); font-weight: 500; }
+  .search-error { color: var(--danger-500); }
+
+  .tabs {
+    flex-shrink: 0;
+    display: flex;
+    border-bottom: 1px solid var(--space-700);
+    background: var(--space-900);
+  }
+  @media (min-width: 1024px) { .tabs { display: none; } }
+  .tab-btn {
+    flex: 1; padding: 10px 0;
+    font-size: 14px; font-weight: 500;
+    background: none; border: none;
+    color: var(--starlight-700);
+    cursor: pointer;
+    font-family: inherit;
+    border-bottom: 2px solid transparent;
+  }
+  .tab-btn.active { color: var(--starlight-100); border-bottom-color: var(--signal-500); }
+
+  .console {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel { display: none; flex-direction: column; padding: 16px; }
+  .panel.active { display: flex; }
+  @media (min-width: 1024px) { .panel { display: flex !important; } }
+
+  .panel-map { flex: 1; }
+  .panel-sky {
+    width: 100%;
+  }
+  .panel-alerts { width: 100%; }
+  @media (min-width: 1024px) {
+    .panel-sky { width: 380px; border-left: 1px solid var(--space-700); align-items: center; justify-content: center; }
+    .panel-alerts { width: 340px; border-left: 1px solid var(--space-700); }
+  }
+
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .panel-title { font-size: 14px; font-weight: 600; color: var(--starlight-300); }
+  .panel-meta { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--starlight-700); }
+
+  #map {
+    flex: 1;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(58, 74, 143, 0.6);
+    background: var(--space-900) !important;
+  }
+  .map-hint { margin-top: 8px; font-size: 11px; color: var(--starlight-700); }
+
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--space-800); color: var(--starlight-300); }
+  .leaflet-control-zoom a { background: var(--space-700) !important; color: var(--starlight-300) !important; border-color: var(--space-600) !important; }
+  .leaflet-control-attribution { background: rgba(10,14,26,0.7) !important; color: var(--starlight-700) !important; }
+  .leaflet-control-attribution a { color: var(--starlight-500) !important; }
+
+  /* ===== Zenith dial ===== */
+  .dial-wrap { display: flex; flex-direction: column; align-items: center; }
+  .dial-legend {
+    margin-top: 12px; display: flex; align-items: center; gap: 16px;
+    font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--starlight-500);
+  }
+  .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dial-caption { margin-top: 4px; font-size: 10px; color: var(--starlight-700); font-family: 'JetBrains Mono', monospace; }
+
+  .tracked-section { margin-top: 24px; width: 100%; }
+  .tracked-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--starlight-700); margin-bottom: 8px;
+  }
+  .tracked-list { max-height: 260px; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 8px; }
+
+  .sat-card {
+    border-radius: 12px; border: 1px solid var(--space-700);
+    background: rgba(15, 21, 38, 0.5);
+    padding: 12px 14px;
+  }
+  .sat-card.visible { border-color: rgba(78, 224, 200, 0.3); background: rgba(78, 224, 200, 0.05); }
+  .sat-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .sat-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .sat-name { font-size: 13px; font-weight: 500; color: var(--starlight-100); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sat-badge { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.03em; color: var(--teal-400); flex-shrink: 0; }
+  .sat-category { margin-top: 6px; font-size: 11px; color: var(--starlight-700); }
+  .sat-stats { margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--starlight-500); }
+  .sat-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--starlight-700); }
+  .sat-stat-value { color: var(--starlight-300); }
+  .sat-stat-value.visible { color: var(--teal-400); }
+
+  .pulse { animation: pulseSlow 3s ease-in-out infinite; }
+  @keyframes pulseSlow { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ===== Event feed ===== */
+  .event-list { flex: 1; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 8px; }
+  .event-card {
+    display: flex; align-items: flex-start; gap: 12px;
+    border-radius: 12px; border: 1px solid var(--space-700);
+    background: rgba(15, 21, 38, 0.5);
+    padding: 12px 14px;
+  }
+  .event-icon {
+    margin-top: 2px; flex-shrink: 0; width: 24px; height: 24px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+  .event-body { min-width: 0; flex: 1; }
+  .event-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .event-title { font-size: 13px; font-weight: 500; color: var(--starlight-100); }
+  .event-time { flex-shrink: 0; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .event-sub { margin-top: 2px; font-size: 12px; color: var(--starlight-700); }
+  .event-date { margin-top: 4px; font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--starlight-700); }
+  .event-empty { border-radius: 12px; border: 1px solid var(--space-700); background: rgba(15, 21, 38, 0.5); padding: 24px 16px; text-align: center; font-size: 14px; color: var(--starlight-700); }
+
+  @keyframes radarSweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <header>
+    <div class="brand">
+      <div class="brand-dot-ring"><div class="brand-dot"></div></div>
+      <div>
+        <div class="brand-title font-display">Project Zenith</div>
+        <div class="brand-subtitle">The Celestial Eye</div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span id="clock">--:--:--</span>
+      <span class="status-divider">|</span>
+      <span id="daynight">—</span>
+      <span class="status-divider">|</span>
+      <span id="datastatus" class="status-loading">○ Connecting…</span>
+    </div>
+  </header>
+
+  <div class="search-bar">
+    <form class="search-form" id="searchForm">
+      <input type="text" class="search-input" id="searchInput" placeholder="Search a city — e.g. Tokyo, Cairo, São Paulo" aria-label="Search for a location" />
+      <button type="submit" class="btn btn-secondary" id="searchBtn">Search</button>
+      <button type="button" class="btn btn-primary" id="gpsBtn">Use my location</button>
+    </form>
+    <div class="search-meta">
+      <span class="search-meta-label">Currently viewing: <span class="search-meta-value" id="locationLabel">New Delhi, India</span></span>
+      <span class="search-error" id="searchError"></span>
+    </div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="map">Map</button>
+    <button class="tab-btn" data-tab="sky">Sky view</button>
+    <button class="tab-btn" data-tab="alerts">Alerts</button>
+  </nav>
+
+  <div class="console">
+    <section class="panel panel-map active" data-panel="map">
+      <div class="panel-header">
+        <span class="panel-title">Live ground track</span>
+        <span class="panel-meta" id="visibleCount">0 objects above your horizon</span>
+      </div>
+      <div id="map"></div>
+      <div class="map-hint">Click anywhere on the map to move your observing point.</div>
+    </section>
+
+    <section class="panel panel-sky" data-panel="sky">
+      <div class="dial-wrap">
+        <div class="panel-title" style="margin-bottom: 16px; align-self: flex-start;">Your zenith, right now</div>
+        <svg id="dial" width="320" height="320" viewBox="0 0 320 320" role="img" aria-label="Zenith dial showing live positions of satellites and celestial bodies above your horizon"></svg>
+        <div class="dial-legend">
+          <span><span class="legend-dot" style="background:#4ee0c8;"></span>Station</span>
+          <span><span class="legend-dot" style="background:#ffb84d;"></span>Weather</span>
+          <span><span class="legend-dot" style="background:#8e9ec2;"></span>Other</span>
+        </div>
+        <div class="dial-caption">center = zenith (directly overhead) · edge = horizon</div>
+
+        <div class="tracked-section">
+          <div class="tracked-title">Tracked objects</div>
+          <div class="tracked-list" id="satList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-alerts" data-panel="alerts">
+      <div class="panel-title" style="margin-bottom: 12px;">Upcoming in your sky</div>
+      <div class="event-list" id="eventList">
+        <div class="event-empty">Calculating upcoming events for this location...</div>
+      </div>
+    </section>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================================
+   PROJECT ZENITH — THE CELESTIAL EYE
+   Single-file prototype. All logic lives in this script tag.
+   ========================================================================= */
+
+// ---------- State ----------
+let observerLat = 28.6139;
+let observerLon = 77.2090;
+let locationLabel = "New Delhi, India";
+let trackedSats = [];       // satrec objects with metadata
+let satPositions = [];      // computed live positions
+let skyObjects = [];        // sun/moon/planets
+let dataStatus = "loading"; // loading | live | offline
+let map, observerMarker, visibilityCircle;
+const satMarkers = {};
+
+const CATEGORY_COLOR = { station: "#4ee0c8", starlink: "#8e9ec2", weather: "#ffb84d", other: "#dce4f0" };
+const CATEGORY_LABEL = { station: "Space station", starlink: "Starlink", weather: "Weather satellite", other: "Spacecraft" };
+
+// ---------- Sample TLE fallback (used if CelesTrak fetch fails / CORS blocked) ----------
+function getSampleSatellites() {
+  const samples = [
+    { id: "25544", name: "ISS (ZARYA)", category: "station",
+      line1: "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9007",
+      line2: "2 25544  51.6400 208.9163 0006703  69.9862  25.2906 15.49560000    11" },
+    { id: "20580", name: "HUBBLE SPACE TELESCOPE", category: "other",
+      line1: "1 20580U 90037B   24001.50000000  .00000700  00000-0  37000-4 0  9008",
+      line2: "2 20580  28.4700 100.0000 0002700  90.0000 270.0000 15.09000000    12" },
+    { id: "48274", name: "STARLINK-2511", category: "starlink",
+      line1: "1 48274U 21035A   24001.50000000  .00002000  00000-0  15000-3 0  9009",
+      line2: "2 48274  53.0500 150.0000 0001000  85.0000 275.0000 15.06000000    13" },
+    { id: "43013", name: "NOAA 20", category: "weather",
+      line1: "1 43013U 17073A   24001.50000000  .00000050  00000-0  30000-4 0  9010",
+      line2: "2 43013  98.7000 200.0000 0001500  60.0000 300.0000 14.19000000    14" }
+  ];
+  return samples.map(s => ({
+    id: s.id, name: s.name, category: s.category,
+    satrec: satellite.twoline2satrec(s.line1, s.line2)
+  }));
+}
+
+const CURATED = [
+  { id: "25544", match: "ISS", category: "station" },
+  { id: "20580", match: "HUBBLE", category: "other" },
+  { id: "48274", match: "STARLINK", category: "starlink" },
+  { id: "43013", match: "NOAA", category: "weather" }
+];
+
+function parseTLEBlock(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < lines.length - 2; i += 3) {
+    if (lines[i+1] && lines[i+1].startsWith("1 ") && lines[i+2] && lines[i+2].startsWith("2 ")) {
+      out.push({ name: lines[i], line1: lines[i+1], line2: lines[i+2] });
+    }
+  }
+  return out;
+}
+
+async function fetchTrackedSatellites() {
+  try {
+    const res = await fetch("https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE", { cache: "no-store" });
+    if (!res.ok) throw new Error("CelesTrak responded " + res.status);
+    const text = await res.text();
+    const parsed = parseTLEBlock(text);
+    const results = [];
+    for (const target of CURATED) {
+      const match = parsed.find(p => p.name.toUpperCase().includes(target.match));
+      if (match) {
+        results.push({
+          id: target.id, name: match.name, category: target.category,
+          satrec: satellite.twoline2satrec(match.line1, match.line2)
+        });
+      }
+    }
+    if (results.length > 0) return { sats: results, live: true };
+    throw new Error("No matches in CelesTrak response");
+  } catch (err) {
+    console.warn("Falling back to sample TLE data:", err);
+    return { sats: getSampleSatellites(), live: false };
+  }
+}
+
+// ---------- Orbital propagation ----------
+function computePositions(sats, lat, lon, date) {
+  const gmst = satellite.gstime(date);
+  const observerGd = {
+    longitude: satellite.degreesToRadians(lon),
+    latitude: satellite.degreesToRadians(lat),
+    height: 0.05
+  };
+
+  return sats.map(sat => {
+    const pv = satellite.propagate(sat.satrec, date);
+    const posEci = pv.position;
+    const velEci = pv.velocity;
+
+    if (!posEci || typeof posEci === "boolean") {
+      return { id: sat.id, name: sat.name, category: sat.category, latitude: 0, longitude: 0, altitude: 0, velocity: 0, azimuth: null, elevation: null, range: null, isVisible: false };
+    }
+
+    const geodetic = satellite.eciToGeodetic(posEci, gmst);
+    const latitude = satellite.degreesLat(geodetic.latitude);
+    const longitude = satellite.degreesLong(geodetic.longitude);
+    const altitude = geodetic.height;
+
+    let velocity = 0;
+    if (velEci && typeof velEci !== "boolean") {
+      velocity = Math.sqrt(velEci.x*velEci.x + velEci.y*velEci.y + velEci.z*velEci.z);
+    }
+
+    const positionEcf = satellite.eciToEcf(posEci, gmst);
+    const lookAngles = satellite.ecfToLookAngles(observerGd, positionEcf);
+    const azimuth = satellite.radiansToDegrees(lookAngles.azimuth);
+    const elevation = satellite.radiansToDegrees(lookAngles.elevation);
+    const range = lookAngles.rangeSat;
+
+    return { id: sat.id, name: sat.name, category: sat.category, latitude, longitude, altitude, velocity, azimuth, elevation, range, isVisible: elevation > 0 };
+  });
+}
+
+// ---------- Astronomy (Sun/Moon/planets, low-precision but real) ----------
+const DEG = Math.PI / 180, RAD = 180 / Math.PI;
+
+function julianDate(date) { return date.getTime() / 86400000 + 2440587.5; }
+
+function siderealTime(jd, lon) {
+  const d = jd - 2451545.0;
+  let gmst = 280.46061837 + 360.98564736629 * d;
+  gmst = ((gmst % 360) + 360) % 360;
+  return (gmst + lon + 360) % 360;
+}
+
+function raDecToAzEl(ra, dec, lat, lst) {
+  const ha = ((lst - ra + 360) % 360) * DEG;
+  const decR = dec * DEG, latR = lat * DEG;
+  const sinEl = Math.sin(decR)*Math.sin(latR) + Math.cos(decR)*Math.cos(latR)*Math.cos(ha);
+  const elevation = Math.asin(sinEl) * RAD;
+  const cosAz = (Math.sin(decR) - Math.sin(latR)*Math.sin(elevation*DEG)) / (Math.cos(latR)*Math.cos(elevation*DEG));
+  let azimuth = Math.acos(Math.min(1, Math.max(-1, cosAz))) * RAD;
+  if (Math.sin(ha) > 0) azimuth = 360 - azimuth;
+  return { azimuth, elevation };
+}
+
+function sunRaDec(jd) {
+  const d = jd - 2451545.0;
+  const g = (357.529 + 0.98560028 * d) % 360;
+  const q = (280.459 + 0.98564736 * d) % 360;
+  const L = q + 1.915*Math.sin(g*DEG) + 0.02*Math.sin(2*g*DEG);
+  const e = 23.439 - 0.00000036 * d;
+  const ra = Math.atan2(Math.cos(e*DEG)*Math.sin(L*DEG), Math.cos(L*DEG)) * RAD;
+  const dec = Math.asin(Math.sin(e*DEG)*Math.sin(L*DEG)) * RAD;
+  return { ra: (ra + 360) % 360, dec };
+}
+
+function moonRaDec(jd) {
+  const d = jd - 2451545.0;
+  const L = (218.316 + 13.176396 * d) % 360;
+  const M = (134.963 + 13.064993 * d) % 360;
+  const F = (93.272 + 13.22935 * d) % 360;
+  const lon = L + 6.289*Math.sin(M*DEG);
+  const lat = 5.128*Math.sin(F*DEG);
+  const e = 23.439;
+  const lonR = lon*DEG, latR = lat*DEG, eR = e*DEG;
+  const ra = Math.atan2(Math.sin(lonR)*Math.cos(eR) - Math.tan(latR)*Math.sin(eR), Math.cos(lonR)) * RAD;
+  const dec = Math.asin(Math.sin(latR)*Math.cos(eR) + Math.cos(latR)*Math.sin(eR)*Math.sin(lonR)) * RAD;
+  return { ra: (ra + 360) % 360, dec };
+}
+
+const PLANET_ELEMENTS = {
+  Mercury: { a: 0.387, e: 0.2056, I: 7.005, L: 252.25, lonPeri: 77.46, lonNode: 48.33, dL: 4.0923 },
+  Venus:   { a: 0.723, e: 0.0068, I: 3.395, L: 181.98, lonPeri: 131.77, lonNode: 76.68, dL: 1.6021 },
+  Mars:    { a: 1.524, e: 0.0934, I: 1.85,  L: 355.43, lonPeri: 336.04, lonNode: 49.56, dL: 0.5240 },
+  Jupiter: { a: 5.203, e: 0.0484, I: 1.303, L: 34.35,  lonPeri: 14.75,  lonNode: 100.49, dL: 0.0831 },
+  Saturn:  { a: 9.537, e: 0.0539, I: 2.485, L: 50.08,  lonPeri: 92.43,  lonNode: 113.66, dL: 0.0335 }
+};
+const PLANET_COLORS = { Mercury: "#b8b0a8", Venus: "#f5e3b3", Mars: "#e8806a", Jupiter: "#e0c08a", Saturn: "#e8d9a8" };
+const PLANET_MAGNITUDES = { Mercury: 0.2, Venus: -4.0, Mars: 0.5, Jupiter: -2.5, Saturn: 0.5 };
+
+function planetRaDec(jd, el) {
+  const d = jd - 2451545.0;
+  const L = (el.L + el.dL * d) % 360;
+  const M = ((L - el.lonPeri + 360) % 360) * DEG;
+  let E = M;
+  for (let i = 0; i < 5; i++) E = M + el.e * Math.sin(E);
+  const xv = el.a * (Math.cos(E) - el.e);
+  const yv = el.a * Math.sqrt(1 - el.e*el.e) * Math.sin(E);
+  const v = Math.atan2(yv, xv);
+  const r = Math.sqrt(xv*xv + yv*yv);
+  const lonPeriR = el.lonPeri*DEG, lonNodeR = el.lonNode*DEG, IR = el.I*DEG;
+  const xh = r*(Math.cos(lonNodeR)*Math.cos(v+lonPeriR-lonNodeR) - Math.sin(lonNodeR)*Math.sin(v+lonPeriR-lonNodeR)*Math.cos(IR));
+  const yh = r*(Math.sin(lonNodeR)*Math.cos(v+lonPeriR-lonNodeR) + Math.cos(lonNodeR)*Math.sin(v+lonPeriR-lonNodeR)*Math.cos(IR));
+  const zh = r*(Math.sin(v+lonPeriR-lonNodeR)*Math.sin(IR));
+  const earthL = (100.464 + 0.9856474*d) * DEG;
+  const xe = Math.cos(earthL), ye = Math.sin(earthL);
+  const xg = xh - xe, yg = yh - ye, zg = zh;
+  const e = 23.439*DEG;
+  const xeq = xg, yeq = yg*Math.cos(e) - zg*Math.sin(e), zeq = yg*Math.sin(e) + zg*Math.cos(e);
+  const ra = (Math.atan2(yeq, xeq)*RAD + 360) % 360;
+  const dec = Math.atan2(zeq, Math.sqrt(xeq*xeq + yeq*yeq)) * RAD;
+  return { ra, dec };
+}
+
+function computeSkyObjects(lat, lon, date) {
+  const jd = julianDate(date);
+  const lst = siderealTime(jd, lon);
+  const bodies = [];
+
+  const sun = sunRaDec(jd);
+  const sunAzEl = raDecToAzEl(sun.ra, sun.dec, lat, lst);
+  bodies.push({ name: "Sun", kind: "sun", azimuth: sunAzEl.azimuth, elevation: sunAzEl.elevation, magnitude: -26.7, color: "#ffd699" });
+
+  const moon = moonRaDec(jd);
+  const moonAzEl = raDecToAzEl(moon.ra, moon.dec, lat, lst);
+  bodies.push({ name: "Moon", kind: "moon", azimuth: moonAzEl.azimuth, elevation: moonAzEl.elevation, magnitude: -12.7, color: "#dce4f0" });
+
+  for (const [name, elements] of Object.entries(PLANET_ELEMENTS)) {
+    const { ra, dec } = planetRaDec(jd, elements);
+    const azEl = raDecToAzEl(ra, dec, lat, lst);
+    bodies.push({ name, kind: "planet", azimuth: azEl.azimuth, elevation: azEl.elevation, magnitude: PLANET_MAGNITUDES[name], color: PLANET_COLORS[name] });
+  }
+  return bodies;
+}
+
+function isNightAt(lat, lon, date) {
+  const jd = julianDate(date);
+  const lst = siderealTime(jd, lon);
+  const sun = sunRaDec(jd);
+  const { elevation } = raDecToAzEl(sun.ra, sun.dec, lat, lst);
+  return elevation < -6;
+}
+
+// ---------- Event feed (passes, planets, meteor showers) ----------
+const METEOR_SHOWERS = [
+  { name: "Quadrantids", month: 1, day: 3, zhr: 110 },
+  { name: "Lyrids", month: 4, day: 22, zhr: 18 },
+  { name: "Perseids", month: 8, day: 12, zhr: 100 },
+  { name: "Orionids", month: 10, day: 21, zhr: 20 },
+  { name: "Geminids", month: 12, day: 14, zhr: 150 }
+];
+
+function findNextPasses(sat, lat, lon, hoursAhead, stepMinutes) {
+  const passes = [];
+  const now = new Date();
+  const steps = Math.floor((hoursAhead*60) / stepMinutes);
+  let wasVisible = false, currentPassStart = null, currentPassMaxEl = 0;
+
+  for (let i = 0; i <= steps; i++) {
+    const t = new Date(now.getTime() + i*stepMinutes*60000);
+    const pos = computePositions([sat], lat, lon, t)[0];
+    const visible = pos.isVisible && (pos.elevation ?? -1) > 0;
+
+    if (visible && !wasVisible) { currentPassStart = t; currentPassMaxEl = pos.elevation ?? 0; }
+    else if (visible && wasVisible) { currentPassMaxEl = Math.max(currentPassMaxEl, pos.elevation ?? 0); }
+    else if (!visible && wasVisible && currentPassStart) { passes.push({ start: currentPassStart, maxElevation: currentPassMaxEl }); currentPassStart = null; }
+    wasVisible = visible;
+    if (passes.length >= 3) break;
+  }
+  return passes;
+}
+
+function nextMeteorShowerDate(month, day, from) {
+  let year = from.getFullYear();
+  let date = new Date(year, month-1, day, 22, 0, 0);
+  if (date < from) date = new Date(year+1, month-1, day, 22, 0, 0);
+  return date;
+}
+
+function buildEventFeed(satellites, lat, lon) {
+  const events = [];
+  const now = new Date();
+
+  const passTargets = satellites.filter(s => s.category === "station" || s.category === "other");
+  for (const sat of passTargets) {
+    const passes = findNextPasses(sat, lat, lon, 36, 3);
+    for (const pass of passes.slice(0, 2)) {
+      events.push({
+        id: "pass-" + sat.id + "-" + pass.start.getTime(),
+        title: sat.name + " flyover",
+        subtitle: "Peak elevation " + Math.round(pass.maxElevation) + "° above horizon",
+        time: pass.start, kind: "pass",
+        accent: sat.category === "station" ? "#4ee0c8" : "#ffb84d"
+      });
+    }
+  }
+
+  const checkTimes = [0,2,4,6].map(h => new Date(now.getTime() + h*3600000));
+  const planetSeen = new Set();
+  for (const t of checkTimes) {
+    const bodies = computeSkyObjects(lat, lon, t);
+    for (const body of bodies) {
+      if (body.kind !== "planet" || planetSeen.has(body.name)) continue;
+      if (body.elevation > 20 && body.magnitude < 1) {
+        events.push({
+          id: "planet-" + body.name + "-" + t.getTime(),
+          title: body.name + " well-placed tonight",
+          subtitle: "Reaches " + Math.round(body.elevation) + "° altitude, easy to spot",
+          time: t, kind: "planet", accent: "#e6982e"
+        });
+        planetSeen.add(body.name);
+      }
+    }
+  }
+
+  let nextShower = null;
+  for (const shower of METEOR_SHOWERS) {
+    const date = nextMeteorShowerDate(shower.month, shower.day, now);
+    if (!nextShower || date < nextShower.date) nextShower = { name: shower.name, date, zhr: shower.zhr };
+  }
+  if (nextShower) {
+    events.push({
+      id: "meteor-" + nextShower.name,
+      title: nextShower.name + " meteor shower",
+      subtitle: "Peak night — up to " + nextShower.zhr + " meteors/hour under dark skies",
+      time: nextShower.date, kind: "meteor", accent: "#ff6b6b"
+    });
+  }
+
+  events.sort((a,b) => a.time - b.time);
+  return events;
+}
+
+// ---------- UI: tabs ----------
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelector('.panel[data-panel="' + btn.dataset.tab + '"]').classList.add("active");
+  });
+});
+
+// ---------- UI: map ----------
+function initMap() {
+  map = L.map("map", { center: [observerLat, observerLon], zoom: 4, worldCopyJump: true });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors',
+    subdomains: "abcd", maxZoom: 19
+  }).addTo(map);
+
+  map.on("click", e => setLocation(e.latlng.lat, e.latlng.lng));
+  updateObserverMarker();
+}
+
+function updateObserverMarker() {
+  if (!map) return;
+  if (observerMarker) {
+    observerMarker.setLatLng([observerLat, observerLon]);
+  } else {
+    observerMarker = L.circleMarker([observerLat, observerLon], {
+      radius: 8, color: "#ffb84d", fillColor: "#ffb84d", fillOpacity: 1, weight: 2
+    }).addTo(map);
+  }
+  if (visibilityCircle) {
+    visibilityCircle.setLatLng([observerLat, observerLon]);
+  } else {
+    visibilityCircle = L.circle([observerLat, observerLon], {
+      radius: 2200000, color: "#3a4a8f", weight: 1, fillColor: "#3a4a8f", fillOpacity: 0.06, dashArray: "4 6"
+    }).addTo(map);
+  }
+  map.panTo([observerLat, observerLon], { animate: true });
+}
+
+function updateSatMarkers() {
+  if (!map) return;
+  const seen = new Set();
+  for (const pos of satPositions) {
+    seen.add(pos.id);
+    const color = CATEGORY_COLOR[pos.category] || "#dce4f0";
+    let marker = satMarkers[pos.id];
+    if (!marker) {
+      marker = L.circleMarker([pos.latitude, pos.longitude], { radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 1.5 }).addTo(map);
+      satMarkers[pos.id] = marker;
+    } else {
+      marker.setLatLng([pos.latitude, pos.longitude]);
+      marker.setStyle({ color, fillColor: color });
+    }
+    marker.bindPopup(
+      '<div style="min-width:160px;"><strong style="color:#ffb84d;">' + pos.name + '</strong><br/>' +
+      '<span style="font-family:JetBrains Mono, monospace; font-size:11px;">' +
+      'Alt: ' + pos.altitude.toFixed(0) + ' km<br/>' +
+      'Speed: ' + pos.velocity.toFixed(2) + ' km/s<br/>' +
+      (pos.elevation !== null ? 'Elevation: ' + pos.elevation.toFixed(1) + '°<br/>' : '') +
+      (pos.isVisible ? '🟢 Above your horizon' : '⚪ Below horizon') + '</span></div>'
+    );
+  }
+  for (const id in satMarkers) {
+    if (!seen.has(id)) { map.removeLayer(satMarkers[id]); delete satMarkers[id]; }
+  }
+}
+
+// ---------- UI: zenith dial ----------
+const SIZE = 320, CENTER = SIZE/2, MAX_R = SIZE/2 - 28;
+
+function azElToXY(az, el) {
+  const r = MAX_R * (1 - el/90);
+  const angleRad = ((az - 90) * Math.PI) / 180;
+  return { x: CENTER + r*Math.cos(angleRad), y: CENTER + r*Math.sin(angleRad) };
+}
+
+function renderDial() {
+  const svg = document.getElementById("dial");
+  const night = isNightAt(observerLat, observerLon, new Date());
+  let html = '<defs>' +
+    '<radialGradient id="dialBg" cx="50%" cy="50%" r="60%">' +
+    '<stop offset="0%" stop-color="' + (night ? "#0f1526" : "#1a2547") + '" />' +
+    '<stop offset="100%" stop-color="#060912" /></radialGradient>' +
+    '<clipPath id="dialClip"><circle cx="' + CENTER + '" cy="' + CENTER + '" r="' + MAX_R + '" /></clipPath>' +
+    '</defs>';
+
+  html += '<circle cx="' + CENTER + '" cy="' + CENTER + '" r="' + MAX_R + '" fill="url(#dialBg)" />';
+
+  [0, 30, 60].forEach((elev, i) => {
+    const r = MAX_R * (1 - elev/90);
+    html += '<circle cx="' + CENTER + '" cy="' + CENTER + '" r="' + r + '" fill="none" stroke="#27336b" stroke-width="' + (i===0?1.5:0.75) + '" ' + (i!==0 ? 'stroke-dasharray="2 4"' : '') + ' />';
+  });
+
+  html += '<line x1="' + CENTER + '" y1="' + (CENTER-MAX_R) + '" x2="' + CENTER + '" y2="' + (CENTER+MAX_R) + '" stroke="#1a2547" stroke-width="0.75" />';
+  html += '<line x1="' + (CENTER-MAX_R) + '" y1="' + CENTER + '" x2="' + (CENTER+MAX_R) + '" y2="' + CENTER + '" stroke="#1a2547" stroke-width="0.75" />';
+
+  // Radar sweep
+  const sweepEndX = CENTER + MAX_R * Math.sin(28 * Math.PI/180);
+  const sweepEndY = CENTER - MAX_R * Math.cos(28 * Math.PI/180);
+  html += '<g clip-path="url(#dialClip)"><g style="transform-origin:' + CENTER + 'px ' + CENTER + 'px; animation: radarSweep 4s linear infinite;">' +
+    '<path d="M ' + CENTER + ' ' + CENTER + ' L ' + CENTER + ' ' + (CENTER-MAX_R) + ' A ' + MAX_R + ' ' + MAX_R + ' 0 0 1 ' + sweepEndX + ' ' + sweepEndY + ' Z" fill="#ffb84d" opacity="0.08" /></g></g>';
+
+  html += '<text x="' + CENTER + '" y="' + (CENTER-MAX_R-10) + '" text-anchor="middle" fill="#8e9ec2" font-family="JetBrains Mono" font-size="10">N</text>';
+  html += '<text x="' + CENTER + '" y="' + (CENTER+MAX_R+18) + '" text-anchor="middle" fill="#8e9ec2" font-family="JetBrains Mono" font-size="10">S</text>';
+  html += '<text x="' + (CENTER+MAX_R+12) + '" y="' + (CENTER+3) + '" text-anchor="middle" fill="#8e9ec2" font-family="JetBrains Mono" font-size="10">E</text>';
+  html += '<text x="' + (CENTER-MAX_R-12) + '" y="' + (CENTER+3) + '" text-anchor="middle" fill="#8e9ec2" font-family="JetBrains Mono" font-size="10">W</text>';
+
+  html += '<circle cx="' + CENTER + '" cy="' + CENTER + '" r="2.5" fill="#5a6690" />';
+
+  // Sky bodies
+  skyObjects.filter(b => b.elevation > 0).forEach(body => {
+    const { x, y } = azElToXY(body.azimuth, body.elevation);
+    const size = body.kind === "sun" ? 7 : body.kind === "moon" ? 6 : 4;
+    html += '<circle cx="' + x + '" cy="' + y + '" r="' + size + '" fill="' + body.color + '" opacity="0.95" />';
+    html += '<text x="' + x + '" y="' + (y - size - 4) + '" text-anchor="middle" fill="#dce4f0" font-size="9">' + body.name + '</text>';
+  });
+
+  // Satellites
+  satPositions.filter(s => s.elevation !== null && s.elevation > 0).forEach(sat => {
+    const { x, y } = azElToXY(sat.azimuth ?? 0, sat.elevation ?? 0);
+    const color = CATEGORY_COLOR[sat.category] || "#dce4f0";
+    html += '<circle cx="' + x + '" cy="' + y + '" r="4" fill="' + color + '" ' + (sat.category === "station" ? 'class="pulse"' : '') + ' />';
+    html += '<circle cx="' + x + '" cy="' + y + '" r="7" fill="none" stroke="' + color + '" stroke-width="1" opacity="0.4" />';
+    html += '<text x="' + x + '" y="' + (y+13) + '" text-anchor="middle" fill="#8e9ec2" font-family="JetBrains Mono" font-size="8">' + sat.name.split(" ")[0] + '</text>';
+  });
+
+  html += '<circle cx="' + CENTER + '" cy="' + CENTER + '" r="' + MAX_R + '" fill="none" stroke="#3a4a8f" stroke-width="1.5" />';
+
+  svg.innerHTML = html;
+}
+
+// ---------- UI: satellite panel ----------
+function renderSatList() {
+  const container = document.getElementById("satList");
+  const sorted = [...satPositions].sort((a,b) => {
+    if (a.isVisible !== b.isVisible) return a.isVisible ? -1 : 1;
+    return (b.elevation ?? -90) - (a.elevation ?? -90);
+  });
+
+  container.innerHTML = sorted.map(sat => `
+    <div class="sat-card ${sat.isVisible ? "visible" : ""}">
+      <div class="sat-card-head">
+        <div class="sat-name-row">
+          <span class="sat-dot ${sat.isVisible ? "pulse" : ""}" style="background:${CATEGORY_COLOR[sat.category]}"></span>
+          <span class="sat-name">${sat.name}</span>
+        </div>
+        ${sat.isVisible ? '<span class="sat-badge">Above you now</span>' : ""}
+      </div>
+      <div class="sat-category">${CATEGORY_LABEL[sat.category]}</div>
+      <div class="sat-stats">
+        <div><div class="sat-stat-label">Altitude</div><div class="sat-stat-value">${sat.altitude.toFixed(0)} km</div></div>
+        <div><div class="sat-stat-label">Speed</div><div class="sat-stat-value">${sat.velocity.toFixed(1)} km/s</div></div>
+        <div><div class="sat-stat-label">Elevation</div><div class="sat-stat-value ${sat.isVisible ? "visible" : ""}">${sat.elevation !== null ? sat.elevation.toFixed(0) + "°" : "—"}</div></div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ---------- UI: event feed ----------
+const KIND_ICON = { pass: "◐", planet: "●", meteor: "✦" };
+
+function formatRelativeTime(date) {
+  const diffMs = date - new Date();
+  const diffMin = Math.round(diffMs / 60000);
+  if (diffMin < 1) return "happening now";
+  if (diffMin < 60) return "in " + diffMin + " min";
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return "in " + diffHr + " hr";
+  const diffDays = Math.round(diffHr / 24);
+  return "in " + diffDays + " day" + (diffDays > 1 ? "s" : "");
+}
+
+function renderEvents(events) {
+  const container = document.getElementById("eventList");
+  if (events.length === 0) {
+    container.innerHTML = '<div class="event-empty">Calculating upcoming events for this location...</div>';
+    return;
+  }
+  container.innerHTML = events.map(event => `
+    <div class="event-card">
+      <span class="event-icon" style="background:${event.accent}22; color:${event.accent}">${KIND_ICON[event.kind]}</span>
+      <div class="event-body">
+        <div class="event-top">
+          <span class="event-title">${event.title}</span>
+          <span class="event-time" style="color:${event.accent}">${formatRelativeTime(event.time)}</span>
+        </div>
+        <div class="event-sub">${event.subtitle}</div>
+        <div class="event-date">${event.time.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${event.time.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })} local time</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ---------- Status bar ----------
+function updateStatusBar() {
+  const now = new Date();
+  document.getElementById("clock").textContent = now.toLocaleTimeString(undefined, { hour12: false }) + " local";
+
+  const night = isNightAt(observerLat, observerLon, now);
+  const dn = document.getElementById("daynight");
+  dn.textContent = night ? "Night sky" : "Daylight";
+  dn.className = night ? "status-night" : "status-day";
+
+  const ds = document.getElementById("datastatus");
+  if (dataStatus === "live") { ds.textContent = "● Live data"; ds.className = "status-live"; }
+  else if (dataStatus === "loading") { ds.textContent = "○ Connecting…"; ds.className = "status-loading"; }
+  else { ds.textContent = "○ Offline sample data"; ds.className = "status-offline"; }
+
+  const visCount = satPositions.filter(s => s.isVisible).length;
+  document.getElementById("visibleCount").textContent = visCount + " object" + (visCount !== 1 ? "s" : "") + " above your horizon";
+}
+
+// ---------- Location handling ----------
+function setLocation(lat, lon, label) {
+  observerLat = lat;
+  observerLon = lon;
+  locationLabel = label || (lat.toFixed(2) + "°, " + lon.toFixed(2) + "°");
+  document.getElementById("locationLabel").textContent = locationLabel;
+  updateObserverMarker();
+  tick();
+  refreshEvents();
+}
+
+document.getElementById("searchForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const query = document.getElementById("searchInput").value.trim();
+  const errorEl = document.getElementById("searchError");
+  errorEl.textContent = "";
+  if (!query) return;
+
+  document.getElementById("searchBtn").disabled = true;
+  try {
+    const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&q=" + encodeURIComponent(query) + "&limit=1");
+    const data = await res.json();
+    if (data.length === 0) { errorEl.textContent = "Couldn't find that place — try a different search"; return; }
+    const result = data[0];
+    setLocation(parseFloat(result.lat), parseFloat(result.lon), result.display_name.split(",").slice(0,2).join(","));
+  } catch {
+    errorEl.textContent = "Search failed — check your connection";
+  } finally {
+    document.getElementById("searchBtn").disabled = false;
+  }
+});
+
+document.getElementById("gpsBtn").addEventListener("click", () => {
+  const errorEl = document.getElementById("searchError");
+  errorEl.textContent = "";
+  if (!navigator.geolocation) { errorEl.textContent = "Your browser doesn't support location access"; return; }
+  document.getElementById("gpsBtn").disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      setLocation(pos.coords.latitude, pos.coords.longitude, "Your current location");
+      document.getElementById("gpsBtn").disabled = false;
+    },
+    () => {
+      errorEl.textContent = "Location access denied — try searching a city instead";
+      document.getElementById("gpsBtn").disabled = false;
+    },
+    { timeout: 8000 }
+  );
+});
+
+// ---------- Main tick loop ----------
+function tick() {
+  const now = new Date();
+  if (trackedSats.length > 0) {
+    satPositions = computePositions(trackedSats, observerLat, observerLon, now);
+  }
+  skyObjects = computeSkyObjects(observerLat, observerLon, now);
+  updateStatusBar();
+  updateSatMarkers();
+  renderDial();
+  renderSatList();
+}
+
+function refreshEvents() {
+  if (trackedSats.length === 0) return;
+  const events = buildEventFeed(trackedSats, observerLat, observerLon);
+  renderEvents(events);
+}
+
+// ---------- Init ----------
+async function init() {
+  initMap();
+  tick();
+
+  const { sats, live } = await fetchTrackedSatellites();
+  trackedSats = sats;
+  dataStatus = live ? "live" : "offline";
+
+  tick();
+  refreshEvents();
+
+  setInterval(tick, 5000);
+  setInterval(refreshEvents, 60000);
+}
+
+init();
+</script>
+</body>
+</html>
